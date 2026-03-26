@@ -154,6 +154,69 @@ public class TestRoaringPositionBitmap {
   }
 
   @TestTemplate
+  public void testAddRangeLargeContiguous() {
+    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
+
+    long start = 500L;
+    long end = 200_500L;
+    bitmap.setRange(start, end);
+
+    assertThat(bitmap.cardinality()).isEqualTo(200_000L);
+    assertThat(bitmap.contains(start)).isTrue();
+    assertThat(bitmap.contains(end - 1)).isTrue();
+    assertThat(bitmap.contains(start - 1)).isFalse();
+    assertThat(bitmap.contains(end)).isFalse();
+  }
+
+  @TestTemplate
+  public void testAddRangeSpanningThreeKeys() {
+    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
+
+    long start = ((long) 0 << 32) | 0xFFFFFFF0L;
+    long end = ((long) 2 << 32) | 0x10L;
+    bitmap.setRange(start, end);
+
+    assertThat(bitmap.contains(start)).isTrue();
+    assertThat(bitmap.contains(end - 1)).isTrue();
+    assertThat(bitmap.contains(start - 1)).isFalse();
+    assertThat(bitmap.contains(end)).isFalse();
+
+    // key 1 should be fully covered
+    assertThat(bitmap.contains((long) 1 << 32)).isTrue();
+    assertThat(bitmap.contains(((long) 1 << 32) | 0xFFFFFFFFL)).isTrue();
+
+    long expectedCardinality = end - start;
+    assertThat(bitmap.cardinality()).isEqualTo(expectedCardinality);
+  }
+
+  @TestTemplate
+  public void testAddRangeSinglePosition() {
+    RoaringPositionBitmap rangeBitmap = new RoaringPositionBitmap();
+    rangeBitmap.setRange(42, 43);
+
+    RoaringPositionBitmap setBitmap = new RoaringPositionBitmap();
+    setBitmap.set(42);
+
+    assertThat(rangeBitmap.cardinality()).isEqualTo(setBitmap.cardinality());
+    assertThat(rangeBitmap.contains(42)).isTrue();
+    assertThat(rangeBitmap.contains(41)).isFalse();
+    assertThat(rangeBitmap.contains(43)).isFalse();
+  }
+
+  @TestTemplate
+  public void testAddRangeAtKeyBoundary() {
+    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
+
+    bitmap.setRange(0L, 1L << 32);
+
+    assertThat(bitmap.cardinality()).isEqualTo(1L << 32);
+    assertThat(bitmap.contains(0L)).isTrue();
+    assertThat(bitmap.contains((1L << 32) - 1)).isTrue();
+    assertThat(bitmap.contains(1L << 32)).isFalse();
+    assertThat(bitmap.allocatedBitmapCount()).isEqualTo(1);
+  }
+
+  @TestTemplate
   public void testAddAll() {
     RoaringPositionBitmap bitmap1 = new RoaringPositionBitmap();
     bitmap1.set(10L);
