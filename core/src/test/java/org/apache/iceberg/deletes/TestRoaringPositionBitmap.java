@@ -148,9 +148,18 @@ public class TestRoaringPositionBitmap {
 
   @TestTemplate
   public void testAddEmptyRange() {
-    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
-    bitmap.setRange(10, 10);
-    assertThat(bitmap.isEmpty()).isTrue();
+    RoaringPositionBitmap equalRange = new RoaringPositionBitmap();
+    equalRange.setRange(10, 10);
+    assertThat(equalRange.isEmpty()).isTrue();
+    assertThat(equalRange.cardinality()).isEqualTo(0);
+    assertThat(equalRange.contains(10)).isFalse();
+
+    RoaringPositionBitmap reversedRange = new RoaringPositionBitmap();
+    reversedRange.setRange(100, 50);
+    assertThat(reversedRange.isEmpty()).isTrue();
+    assertThat(reversedRange.cardinality()).isEqualTo(0);
+    assertThat(reversedRange.contains(50)).isFalse();
+    assertThat(reversedRange.contains(100)).isFalse();
   }
 
   @TestTemplate
@@ -214,6 +223,40 @@ public class TestRoaringPositionBitmap {
     assertThat(bitmap.contains((1L << 32) - 1)).isTrue();
     assertThat(bitmap.contains(1L << 32)).isFalse();
     assertThat(bitmap.allocatedBitmapCount()).isEqualTo(1);
+  }
+
+  @TestTemplate
+  public void testAddRangeSameKeyForEachExact() {
+    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
+
+    long start = 1000L;
+    long end = 1200L;
+    bitmap.setRange(start, end);
+
+    assertThat(bitmap.cardinality()).isEqualTo(end - start);
+    assertThat(bitmap.contains(start - 1)).isFalse();
+    assertThat(bitmap.contains(end)).isFalse();
+
+    for (long pos = start; pos < end; pos++) {
+      assertThat(bitmap.contains(pos)).isTrue();
+    }
+  }
+
+  @TestTemplate
+  public void testAddRangeCrossKeyForEachExact() {
+    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
+
+    long start = ((long) 1 << 32) - 100L;
+    long end = ((long) 1 << 32) + 100L;
+    bitmap.setRange(start, end);
+
+    assertThat(bitmap.cardinality()).isEqualTo(end - start);
+    assertThat(bitmap.contains(start - 1)).isFalse();
+    assertThat(bitmap.contains(end)).isFalse();
+
+    for (long pos = start; pos < end; pos++) {
+      assertThat(bitmap.contains(pos)).isTrue();
+    }
   }
 
   @TestTemplate
