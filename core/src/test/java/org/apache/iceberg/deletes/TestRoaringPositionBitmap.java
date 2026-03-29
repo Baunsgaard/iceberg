@@ -463,6 +463,18 @@ public class TestRoaringPositionBitmap {
         .hasMessageContaining(
             "Bitmap supports positions that are >= 0 and <= %s",
             RoaringPositionBitmap.MAX_POSITION);
+
+    assertThatThrownBy(() -> bitmap.setRange(-1L, 1L))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(
+            "Bitmap supports positions that are >= 0 and <= %s",
+            RoaringPositionBitmap.MAX_POSITION);
+
+    assertThatThrownBy(() -> bitmap.setRange(0L, RoaringPositionBitmap.MAX_POSITION + 2L))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(
+            "Bitmap supports positions that are >= 0 and <= %s",
+            RoaringPositionBitmap.MAX_POSITION);
   }
 
   @TestTemplate

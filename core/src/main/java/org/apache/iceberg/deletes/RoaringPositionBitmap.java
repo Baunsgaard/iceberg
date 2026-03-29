@@ -79,7 +79,8 @@ class RoaringPositionBitmap {
   }
 
   /**
-   * Sets a range of positions in the bitmap.
+   * Sets a range of positions in the bitmap. If {@code posStartInclusive} is greater than or equal
+   * to {@code posEndExclusive}, this method does nothing.
    *
    * @param posStartInclusive the start position of the range (inclusive)
    * @param posEndExclusive the end position of the range (exclusive)
