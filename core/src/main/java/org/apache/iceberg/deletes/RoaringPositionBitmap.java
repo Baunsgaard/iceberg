@@ -79,14 +79,21 @@ class RoaringPositionBitmap {
   }
 
   /**
-   * Sets a range of positions in the bitmap. If {@code posStartInclusive} is greater than or equal
-   * to {@code posEndExclusive}, this method does nothing.
+   * Sets a range of positions in the bitmap. If {@code posStartInclusive} equals {@code
+   * posEndExclusive}, this method does nothing.
    *
    * @param posStartInclusive the start position of the range (inclusive)
    * @param posEndExclusive the end position of the range (exclusive)
+   * @throws IllegalArgumentException if posStartInclusive &gt; posEndExclusive
    */
   public void setRange(long posStartInclusive, long posEndExclusive) {
-    if (posStartInclusive >= posEndExclusive) {
+    Preconditions.checkArgument(
+        posStartInclusive <= posEndExclusive,
+        "Start position must not exceed end position: [%s, %s)",
+        posStartInclusive,
+        posEndExclusive);
+
+    if (posStartInclusive == posEndExclusive) {
       return;
     }
 

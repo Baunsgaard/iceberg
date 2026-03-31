@@ -153,13 +153,14 @@ public class TestRoaringPositionBitmap {
     assertThat(equalRange.isEmpty()).isTrue();
     assertThat(equalRange.cardinality()).isEqualTo(0);
     assertThat(equalRange.contains(10)).isFalse();
+  }
 
-    RoaringPositionBitmap reversedRange = new RoaringPositionBitmap();
-    reversedRange.setRange(100, 50);
-    assertThat(reversedRange.isEmpty()).isTrue();
-    assertThat(reversedRange.cardinality()).isEqualTo(0);
-    assertThat(reversedRange.contains(50)).isFalse();
-    assertThat(reversedRange.contains(100)).isFalse();
+  @TestTemplate
+  public void testSetRangeReversedThrows() {
+    RoaringPositionBitmap bitmap = new RoaringPositionBitmap();
+    assertThatThrownBy(() -> bitmap.setRange(100, 50))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Start position must not exceed end position");
   }
 
   @TestTemplate
