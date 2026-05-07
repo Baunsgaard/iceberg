@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.Files;
@@ -42,7 +43,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
-class TestVectorizedPositionDeleteReader {
+public class TestVectorizedPositionDeleteReader {
 
   private static final String FILE_A = "s3://bucket/data/file-a.parquet";
   private static final String FILE_B = "s3://bucket/data/file-b.parquet";
@@ -60,7 +61,7 @@ class TestVectorizedPositionDeleteReader {
     PositionDeleteIndex aIndex =
         VectorizedPositionDeleteReader.read(Files.localInput(deleteFile), FILE_A, null);
     assertAllPositionsDeleted(aIndex, aPositions, FILE_A);
-    assertNoPositionsDeleted(aIndex, bPositions, FILE_A);
+    assertNoPositionsDeleted(aIndex, bPositions, "FILE_B positions in FILE_A-filtered index");
     assertThat(aIndex.cardinality()).as("FILE_A index cardinality").isEqualTo(aPositions.size());
 
     PositionDeleteIndex bIndex =
@@ -142,6 +143,66 @@ class TestVectorizedPositionDeleteReader {
   }
 
   @Test
+  void filtersDictionaryEncodedFilePath() throws IOException {
+    // Many rows over only two distinct file_path values force Parquet to encode
+    // file_path with RLE_DICTIONARY. On the read side, this routes through
+    // DictEncodedArrowConverter, which decodes the dictionary into a plain
+    // VarCharVector once per batch instead of once per row. This test pins
+    // that the byte-for-byte filter still matches when the path column was
+    // dictionary-encoded.
+    File deleteFile = newDeleteFile("dict-encoded.parquet");
+    int rowsPerFile = 4_096;
+    List<Long> aPositions = Lists.newArrayListWithExpectedSize(rowsPerFile);
+    List<Long> bPositions = Lists.newArrayListWithExpectedSize(rowsPerFile);
+    for (long i = 0; i < rowsPerFile; i++) {
+      aPositions.add(i);
+      bPositions.add(i);
+    }
+    writeDeletesForTwoFiles(deleteFile, aPositions, bPositions);
+
+    PositionDeleteIndex aIndex =
+        VectorizedPositionDeleteReader.read(Files.localInput(deleteFile), FILE_A, null);
+    assertThat(aIndex.cardinality())
+        .as("dictionary-encoded path filter should keep all FILE_A rows only")
+        .isEqualTo(rowsPerFile);
+    assertAllPositionsDeleted(aIndex, aPositions, "FILE_A (dictionary-encoded)");
+    assertNoPositionsDeleted(
+        aIndex, bPositions, "FILE_B positions in dictionary-encoded FILE_A index");
+  }
+
+  @Test
+  void filteredReadWithUnknownPathReturnsEmptyIndex() throws IOException {
+    File deleteFile = newDeleteFile("unknown-path.parquet");
+    writeDeletesForTwoFiles(deleteFile, ImmutableList.of(1L, 2L, 3L), ImmutableList.of(10L, 20L));
+
+    PositionDeleteIndex index =
+        VectorizedPositionDeleteReader.read(
+            Files.localInput(deleteFile), "s3://bucket/data/file-c.parquet", null);
+
+    assertThat(index.isEmpty())
+        .as("filter for unknown data file path should yield an empty index")
+        .isTrue();
+    assertThat(index.cardinality()).as("empty index cardinality").isEqualTo(0L);
+  }
+
+  @Test
+  void surfacesIOFailuresWithFileLocation() throws IOException {
+    // Iceberg's Parquet stack wraps IOException in RuntimeIOException, so the
+    // catch block in read() fires only on try-with-resources close failures.
+    // Verify that an unreadable file does not silently produce an empty
+    // index: some RuntimeException must propagate to the caller, with the
+    // file location preserved in its message chain for diagnosability.
+    File invalid = newDeleteFile("not-parquet.bin");
+    java.nio.file.Files.write(invalid.toPath(), new byte[] {0, 1, 2, 3}, StandardOpenOption.CREATE);
+
+    assertThatThrownBy(
+            () -> VectorizedPositionDeleteReader.read(Files.localInput(invalid), FILE_A, null))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("not a Parquet file")
+        .hasStackTraceContaining(invalid.getAbsolutePath());
+  }
+
+  @Test
   void honorsExplicitBatchSize() throws IOException {
     File deleteFile = newDeleteFile("small-batches.parquet");
     List<Long> positions = Lists.newArrayList();
@@ -170,13 +231,8 @@ class TestVectorizedPositionDeleteReader {
 
   // ---------- helpers ----------
 
-  private File newDeleteFile(String name) throws IOException {
-    File file = tempDir.resolve(name).toFile();
-    if (file.exists()) {
-      file.delete();
-    }
-
-    return file;
+  private File newDeleteFile(String name) {
+    return tempDir.resolve(name).toFile();
   }
 
   private static PositionDeleteWriter<Void> openPositionDeleteWriter(File file) throws IOException {
