@@ -991,6 +991,12 @@ project(':iceberg-arrow') {
     }
 
     testImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')
+    // iceberg-data exposes BaseDeleteLoader, exercised by JMH benchmarks that verify the
+    // FormatModelRegistry-driven dispatch ends up in the Arrow position-delete fast path.
+    // iceberg-orc is needed at runtime because GenericFormatModels.register() (loaded by
+    // FormatModelRegistry's static init via SPI) references ORC reader/writer classes.
+    testImplementation project(':iceberg-data')
+    testRuntimeOnly project(':iceberg-orc')
     // To run ArrowReaderTest test cases, :netty-common is needed.
     // We import :netty-common through :arrow-memory-netty
     // so that the same version as used by the :arrow-memory-netty module is picked.
