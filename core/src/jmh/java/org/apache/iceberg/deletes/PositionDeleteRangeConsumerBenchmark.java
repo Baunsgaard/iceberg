@@ -55,6 +55,16 @@ import org.openjdk.jmh.infra.Blackhole;
  *   <li>{@code NONE} -- every other position (step 2), no consecutive pairs at all.
  * </ul>
  *
+ * <p>Two consumer strategies are measured side by side:
+ *
+ * <ul>
+ *   <li>The production {@link PositionDeleteRangeConsumer}, which sniffs the first {@code 256}
+ *       positions and escapes to a per-position fallback if more than {@code 30%} are gaps.
+ *   <li>A greedy baseline ({@link GreedyRangeConsumer}, defined in this file) that always tries to
+ *       coalesce -- no sniff window, no escape. Its purpose is to isolate the cost the escape path
+ *       avoids on fragmented input and to confirm that adaptive coalescing pays for itself.
+ * </ul>
+ *
  * <p>To run: <code>
  *   ./gradlew :iceberg-core:jmh
  *       -PjmhIncludeRegex=PositionDeleteRangeConsumerBenchmark
@@ -71,6 +81,9 @@ import org.openjdk.jmh.infra.Blackhole;
 public class PositionDeleteRangeConsumerBenchmark {
 
   private static final int TOTAL_POSITIONS = 5_000_000;
+  // Matches PositionDeleteRangeConsumer.FOREACH_BATCH_SIZE so the boxed-iterable comparison stays
+  // apples-to-apples: same drain buffer, only the consumer's coalesce strategy differs.
+  private static final int FOREACH_BATCH_SIZE = 64;
 
   @Param({"FULL", "MEDIUM", "SHORT", "SPARSE_95", "SPARSE_50", "SPARSE_5", "NONE"})
   private String distribution;
@@ -101,6 +114,44 @@ public class PositionDeleteRangeConsumerBenchmark {
   public void acceptAllIntoFreshIndex(Blackhole blackhole) {
     BitmapPositionDeleteIndex index = new BitmapPositionDeleteIndex(ImmutableList.of());
     PositionDeleteRangeConsumer acc = new PositionDeleteRangeConsumer(index);
+    acc.acceptAll(rawPositions, 0, rawPositions.length);
+    acc.flush();
+    blackhole.consume(index);
+  }
+
+  /**
+   * Greedy-only baseline of {@link #forEachIntoFreshIndex}: same boxed source, same batch drain,
+   * but a coalescer with no sniff window and no escape. On dense distributions this should match
+   * the production consumer closely; on {@code SPARSE_5}/{@code NONE} it carries the bookkeeping
+   * cost that the escape path avoids.
+   */
+  @Benchmark
+  @Threads(1)
+  public void greedyForEachIntoFreshIndex(Blackhole blackhole) {
+    BitmapPositionDeleteIndex index = new BitmapPositionDeleteIndex(ImmutableList.of());
+    GreedyRangeConsumer acc = new GreedyRangeConsumer(index);
+    long[] buffer = new long[FOREACH_BATCH_SIZE];
+    int filled = 0;
+    for (Long pos : positions) {
+      buffer[filled++] = pos;
+      if (filled == FOREACH_BATCH_SIZE) {
+        acc.acceptAll(buffer, 0, FOREACH_BATCH_SIZE);
+        filled = 0;
+      }
+    }
+    if (filled > 0) {
+      acc.acceptAll(buffer, 0, filled);
+    }
+    acc.flush();
+    blackhole.consume(index);
+  }
+
+  /** Greedy-only baseline of {@link #acceptAllIntoFreshIndex} -- direct {@code long[]} feed. */
+  @Benchmark
+  @Threads(1)
+  public void greedyAcceptAllIntoFreshIndex(Blackhole blackhole) {
+    BitmapPositionDeleteIndex index = new BitmapPositionDeleteIndex(ImmutableList.of());
+    GreedyRangeConsumer acc = new GreedyRangeConsumer(index);
     acc.acceptAll(rawPositions, 0, rawPositions.length);
     acc.flush();
     blackhole.consume(index);
@@ -191,5 +242,54 @@ public class PositionDeleteRangeConsumerBenchmark {
         return raw.length;
       }
     };
+  }
+
+  /**
+   * Greedy-only baseline. Maintains a single active run and either extends it or emits it on every
+   * position. Mirrors {@link PositionDeleteRangeConsumer} minus the sniff window and the per-
+   * position escape path; intended only as a benchmark counterfactual, not for production use.
+   */
+  static final class GreedyRangeConsumer {
+    private final PositionDeleteIndex target;
+    private boolean hasRun;
+    private long rangeStart;
+    private long lastPosition;
+
+    GreedyRangeConsumer(PositionDeleteIndex target) {
+      this.target = target;
+    }
+
+    void acceptAll(long[] positions, int from, int to) {
+      int cursor = from;
+      if (!hasRun && cursor < to) {
+        long first = positions[cursor++];
+        rangeStart = first;
+        lastPosition = first;
+        hasRun = true;
+      }
+      while (cursor < to) {
+        long pos = positions[cursor++];
+        if (pos - lastPosition != 1) {
+          emit();
+          rangeStart = pos;
+        }
+        lastPosition = pos;
+      }
+    }
+
+    void flush() {
+      if (hasRun) {
+        emit();
+        hasRun = false;
+      }
+    }
+
+    private void emit() {
+      if (rangeStart == lastPosition) {
+        target.delete(rangeStart);
+      } else {
+        target.delete(rangeStart, lastPosition + 1);
+      }
+    }
   }
 }
