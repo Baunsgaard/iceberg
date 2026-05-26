@@ -160,71 +160,22 @@ public class PositionDeleteRangeConsumerBenchmark {
   private static long[] generate(String dist, int total) {
     switch (dist) {
       case "FULL":
-        return contiguous(total);
+        return PositionDistributions.contiguous(total);
       case "MEDIUM":
-        return runsOf(total, 64);
+        return PositionDistributions.runsOf(total, 64);
       case "SHORT":
-        return runsOf(total, 4);
+        return PositionDistributions.runsOf(total, 4);
       case "SPARSE_95":
-        return mostlyContiguousWithBoundaries(total, 95);
+        return PositionDistributions.mostlyContiguousWithBoundaries(total, 95);
       case "SPARSE_50":
-        return mostlyContiguousWithBoundaries(total, 50);
+        return PositionDistributions.mostlyContiguousWithBoundaries(total, 50);
       case "SPARSE_5":
-        return mostlyContiguousWithBoundaries(total, 5);
+        return PositionDistributions.mostlyContiguousWithBoundaries(total, 5);
       case "NONE":
-        return strided(total, 2L);
+        return PositionDistributions.strided(total, 2L);
       default:
         throw new IllegalArgumentException("Unknown distribution: " + dist);
     }
-  }
-
-  private static long[] contiguous(int total) {
-    long[] out = new long[total];
-    for (int i = 0; i < total; i++) {
-      out[i] = i;
-    }
-    return out;
-  }
-
-  private static long[] strided(int total, long step) {
-    long[] out = new long[total];
-    for (int i = 0; i < total; i++) {
-      out[i] = i * step;
-    }
-    return out;
-  }
-
-  // Emits runs of length runLen separated by a 1-position gap, deterministic.
-  private static long[] runsOf(int total, int runLen) {
-    long[] out = new long[total];
-    long pos = 0;
-    int written = 0;
-    while (written < total) {
-      int chunk = Math.min(runLen, total - written);
-      for (int i = 0; i < chunk; i++) {
-        out[written++] = pos++;
-      }
-      pos++; // gap
-    }
-    return out;
-  }
-
-  // Emits a sequence whose adjacent pairs cross a gap with the given probability percentage.
-  // A linear-congruential-style counter walks through the values to avoid Random's allocation
-  // and to keep the layout fully deterministic across runs.
-  private static long[] mostlyContiguousWithBoundaries(int total, int gapPercent) {
-    long[] out = new long[total];
-    long pos = 0;
-    out[0] = pos;
-    long counter = 1;
-    for (int i = 1; i < total; i++) {
-      // Pseudo-random in [0, 100), seeded only by the counter -- run-to-run identical.
-      counter = counter * 6364136223846793005L + 1442695040888963407L;
-      int draw = (int) ((counter >>> 33) % 100);
-      pos = (draw < gapPercent) ? pos + 2 : pos + 1;
-      out[i] = pos;
-    }
-    return out;
   }
 
   // Wraps a long[] as a List<Long> without copying. The boxing happens in get(int) on every

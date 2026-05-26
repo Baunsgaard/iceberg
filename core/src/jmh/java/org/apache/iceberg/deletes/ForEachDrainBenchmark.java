@@ -18,9 +18,7 @@
  */
 package org.apache.iceberg.deletes;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -43,10 +41,10 @@ import org.openjdk.jmh.infra.Blackhole;
  * Iterable Iterable&lt;Long&gt;} source. Compares three strategies for the iterator caller:
  *
  * <ul>
- *   <li>{@code acceptOnly} -- per-element {@link PositionDeleteRangeConsumer#accept(long)} (current
- *       state)
- *   <li>{@code drainSmall} -- buffer to {@code long[64]} then {@link
- *       PositionDeleteRangeConsumer#acceptAll(long[], int, int)}
+ *   <li>{@code noDrain} -- hand each position to {@link
+ *       PositionDeleteRangeConsumer#acceptAll(long[], int, int)} as a 1-element slice, no
+ *       amortization across a buffer.
+ *   <li>{@code drainSmall} -- buffer to {@code long[64]} then {@code acceptAll}
  *   <li>{@code drainLarge} -- buffer to {@code long[1024]} then {@code acceptAll}
  * </ul>
  *
@@ -80,18 +78,10 @@ public class ForEachDrainBenchmark {
 
   @Setup
   public void setupBenchmark() {
-    long[] raw = new long[POSITIONS];
-    if ("dense".equals(distribution)) {
-      for (int i = 0; i < POSITIONS; i++) {
-        raw[i] = i;
-      }
-    } else {
-      Random random = new Random(42L);
-      for (int i = 0; i < POSITIONS; i++) {
-        raw[i] = ((long) random.nextInt(Integer.MAX_VALUE)) * 100L;
-      }
-      Arrays.sort(raw);
-    }
+    long[] raw =
+        "dense".equals(distribution)
+            ? PositionDistributions.contiguous(POSITIONS)
+            : PositionDistributions.randomSorted(POSITIONS, 42L);
     List<Long> list = Lists.newArrayListWithCapacity(POSITIONS);
     for (long pos : raw) {
       list.add(pos);
@@ -99,13 +89,18 @@ public class ForEachDrainBenchmark {
     boxedPositions = list;
   }
 
+  // Models a caller that hands every position to acceptAll as a 1-element slice. Equivalent to
+  // the per-element path we used to expose via accept(long): same state-machine dispatch on every
+  // position, no amortization across a buffer.
   @Benchmark
   @Threads(1)
-  public void acceptOnly(Blackhole bh) {
+  public void noDrain(Blackhole bh) {
     BitmapPositionDeleteIndex target = new BitmapPositionDeleteIndex();
     PositionDeleteRangeConsumer acc = new PositionDeleteRangeConsumer(target);
+    long[] single = new long[1];
     for (Long pos : boxedPositions) {
-      acc.accept(pos);
+      single[0] = pos;
+      acc.acceptAll(single, 0, 1);
     }
     acc.flush();
     bh.consume(target);

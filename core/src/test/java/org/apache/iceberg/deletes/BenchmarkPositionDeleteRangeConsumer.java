@@ -21,6 +21,8 @@ package org.apache.iceberg.deletes;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
+import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -112,7 +114,7 @@ public class BenchmarkPositionDeleteRangeConsumer {
   }
 
   private static void printResult(
-      String label, int n, double[] baselineTimes, double[] consumerTimes) {
+      String label, int count, double[] baselineTimes, double[] consumerTimes) {
     double[] blSorted = baselineTimes.clone();
     double[] coSorted = consumerTimes.clone();
     Arrays.sort(blSorted);
@@ -156,17 +158,17 @@ public class BenchmarkPositionDeleteRangeConsumer {
         minSpeedup,
         baselineStd,
         consumerStd,
-        formatCount(n),
+        formatCount(count),
         rawCo);
   }
 
-  private static String formatCount(int n) {
-    if (n >= 1_000_000) {
-      return (n / 1_000_000) + "M";
-    } else if (n >= 1_000) {
-      return (n / 1_000) + "K";
+  private static String formatCount(int count) {
+    if (count >= 1_000_000) {
+      return (count / 1_000_000) + "M";
+    } else if (count >= 1_000) {
+      return (count / 1_000) + "K";
     }
-    return String.valueOf(n);
+    return String.valueOf(count);
   }
 
   private static double trimmedMean(double[] sorted, int trim) {
@@ -183,8 +185,8 @@ public class BenchmarkPositionDeleteRangeConsumer {
     double sumSq = 0;
     int count = sorted.length - 2 * trim;
     for (int i = trim; i < sorted.length - trim; i++) {
-      double d = sorted[i] - mean;
-      sumSq += d * d;
+      double diff = sorted[i] - mean;
+      sumSq += diff * diff;
     }
     return Math.sqrt(sumSq / count);
   }
@@ -261,7 +263,7 @@ public class BenchmarkPositionDeleteRangeConsumer {
     Random random = new Random(seed);
     long[] positions;
     if (count * 2L <= domain) {
-      java.util.HashSet<Long> chosen = new java.util.HashSet<>(count * 2);
+      Set<Long> chosen = Sets.newHashSetWithExpectedSize(count * 2);
       while (chosen.size() < count) {
         chosen.add((long) (random.nextDouble() * domain));
       }
@@ -273,7 +275,7 @@ public class BenchmarkPositionDeleteRangeConsumer {
       }
     } else {
       long excludeCount = domain - count;
-      java.util.HashSet<Long> excluded = new java.util.HashSet<>((int) (excludeCount * 2));
+      Set<Long> excluded = Sets.newHashSetWithExpectedSize((int) (excludeCount * 2));
       while (excluded.size() < excludeCount) {
         excluded.add((long) (random.nextDouble() * domain));
       }
